@@ -5,6 +5,7 @@ package mux
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,17 +14,19 @@ import (
 
 func TestSchemeMatchers(t *testing.T) {
 	router := NewRouter()
-	router.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/", func(ctx context.Context, rw http.ResponseWriter, r *http.Request, binder Binder) error {
 		_, err := rw.Write([]byte("hello http world"))
 		if err != nil {
 			t.Fatalf("Failed writing HTTP response: %v", err)
 		}
+		return nil
 	}).Schemes("http")
-	router.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/", func(ctx context.Context, rw http.ResponseWriter, r *http.Request, binder Binder) error {
 		_, err := rw.Write([]byte("hello https world"))
 		if err != nil {
 			t.Fatalf("Failed writing HTTP response: %v", err)
 		}
+		return nil
 	}).Schemes("https")
 
 	assertResponseBody := func(t *testing.T, s *httptest.Server, expectedBody string) {
@@ -44,12 +47,16 @@ func TestSchemeMatchers(t *testing.T) {
 	}
 
 	t.Run("httpServer", func(t *testing.T) {
-		s := httptest.NewServer(router)
+		s := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			router.ServeHTTP(context.Background(), writer, request, nil)
+		}))
 		defer s.Close()
 		assertResponseBody(t, s, "hello http world")
 	})
 	t.Run("httpsServer", func(t *testing.T) {
-		s := httptest.NewTLSServer(router)
+		s := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			router.ServeHTTP(context.Background(), writer, request, nil)
+		}))
 		defer s.Close()
 		assertResponseBody(t, s, "hello https world")
 	})

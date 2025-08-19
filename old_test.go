@@ -8,6 +8,7 @@ package mux
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"testing"
 )
@@ -531,7 +532,8 @@ func TestUrlBuilding(t *testing.T) {
 		}
 	}
 
-	ArticleHandler := func(w http.ResponseWriter, r *http.Request) {
+	ArticleHandler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
+		return nil
 	}
 
 	router := NewRouter()
@@ -625,7 +627,7 @@ func TestRedirectSlash(t *testing.T) {
 		t.Errorf("Expected 123.")
 	}
 	rsp := NewRecorder()
-	routeMatch.Handler.ServeHTTP(rsp, request)
+	routeMatch.Handler.ServeHTTP(context.Background(), rsp, request, nil)
 	if rsp.HeaderMap.Get("Location") != "http://localhost/foo/123/" {
 		t.Errorf("Expected redirect header.")
 	}
@@ -644,7 +646,7 @@ func TestRedirectSlash(t *testing.T) {
 		t.Errorf("Expected 123.")
 	}
 	rsp = NewRecorder()
-	routeMatch.Handler.ServeHTTP(rsp, request)
+	routeMatch.Handler.ServeHTTP(context.Background(), rsp, request, nil)
 	if rsp.HeaderMap.Get("Location") != "http://localhost/foo/123" {
 		t.Errorf("Expected redirect header.")
 	}

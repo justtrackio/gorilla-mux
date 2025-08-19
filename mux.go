@@ -54,11 +54,11 @@ func NewRouter() *Router {
 type Router struct {
 	// Configurable Handler to be used when no route matches.
 	// This can be used to render your own 404 Not Found errors.
-	NotFoundHandler http.Handler
+	NotFoundHandler Handler
 
 	// Configurable Handler to be used when the request method does not match the route.
 	// This can be used to render your own 405 Method Not Allowed errors.
-	MethodNotAllowedHandler http.Handler
+	MethodNotAllowedHandler Handler
 
 	// Routes to be matched, in order.
 	routes []*Route
@@ -76,6 +76,9 @@ type Router struct {
 
 	// configuration shared with `Route`
 	routeConf
+
+	// Binder is used to bind request data to the handler.
+	binder Binder
 }
 
 // common route configuration shared between `Router` and `Route`
@@ -154,7 +157,7 @@ func (r *Router) Match(req *http.Request, match *RouteMatch) bool {
 			// Build middleware chain if no error was found
 			if match.MatchErr == nil {
 				for i := len(r.middlewares) - 1; i >= 0; i-- {
-					match.Handler = r.middlewares[i].Middleware(match.Handler)
+					match.Handler = r.middlewares[i].Middleware(HandlerToHandlerFunc(match.Handler))
 				}
 			}
 			return true
@@ -185,7 +188,7 @@ func (r *Router) Match(req *http.Request, match *RouteMatch) bool {
 //
 // When there is a match, the route variables can be retrieved calling
 // mux.Vars(request).
-func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (r *Router) ServeHTTP(ctx context.Context, w http.ResponseWriter, req *http.Request, binder Binder) error {
 	if !r.skipClean {
 		path := req.URL.Path
 		if r.useEncodedPath {
@@ -195,11 +198,11 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if p := cleanPath(path); p != path {
 			w.Header().Set("Location", replaceURLPath(req.URL, p))
 			w.WriteHeader(http.StatusMovedPermanently)
-			return
+			return nil
 		}
 	}
 	var match RouteMatch
-	var handler http.Handler
+	var handler Handler
 	if r.Match(req, &match) {
 		handler = match.Handler
 		if handler != nil {
@@ -222,10 +225,10 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if handler == nil {
-		handler = http.NotFoundHandler()
+		handler = NotFoundHandler()
 	}
 
-	handler.ServeHTTP(w, req)
+	return handler.ServeHTTP(ctx, w, req, binder)
 }
 
 // Get returns a route registered with the given name.
@@ -326,14 +329,13 @@ func (r *Router) Name(name string) *Route {
 
 // Handle registers a new route with a matcher for the URL path.
 // See Route.Path() and Route.Handler().
-func (r *Router) Handle(path string, handler http.Handler) *Route {
+func (r *Router) Handle(path string, handler Handler) *Route {
 	return r.NewRoute().Path(path).Handler(handler)
 }
 
 // HandleFunc registers a new route with a matcher for the URL path.
 // See Route.Path() and Route.HandlerFunc().
-func (r *Router) HandleFunc(path string, f func(http.ResponseWriter,
-	*http.Request)) *Route {
+func (r *Router) HandleFunc(path string, f func(context.Context, http.ResponseWriter, *http.Request, Binder) error) *Route {
 	return r.NewRoute().Path(path).HandlerFunc(f)
 }
 
@@ -445,7 +447,7 @@ func (r *Router) walk(walkFn WalkFunc, ancestors []*Route) error {
 // RouteMatch stores information about a matched route.
 type RouteMatch struct {
 	Route   *Route
-	Handler http.Handler
+	Handler Handler
 	Vars    map[string]string
 
 	// MatchErr is set to appropriate matching error
@@ -667,10 +669,12 @@ func matchMapWithRegex(toCheck map[string]*regexp.Regexp, toMatch map[string][]s
 }
 
 // methodNotAllowed replies to the request with an HTTP status code 405.
-func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
+func methodNotAllowed(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 	w.WriteHeader(http.StatusMethodNotAllowed)
+
+	return nil
 }
 
 // methodNotAllowedHandler returns a simple request handler
 // that replies to each request with a status code 405.
-func methodNotAllowedHandler() http.Handler { return http.HandlerFunc(methodNotAllowed) }
+func methodNotAllowedHandler() Handler { return HandlerFunc(methodNotAllowed) }

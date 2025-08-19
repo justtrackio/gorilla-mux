@@ -5,6 +5,7 @@
 package mux
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,18 +13,18 @@ import (
 
 func BenchmarkMux(b *testing.B) {
 	router := new(Router)
-	handler := func(w http.ResponseWriter, r *http.Request) {}
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
 	router.HandleFunc("/v1/{v1}", handler)
 
 	request, _ := http.NewRequest("GET", "/v1/anything", nil)
 	for i := 0; i < b.N; i++ {
-		router.ServeHTTP(nil, request)
+		router.ServeHTTP(context.Background(), nil, request, nil)
 	}
 }
 
 func BenchmarkMuxSimple(b *testing.B) {
 	router := new(Router)
-	handler := func(w http.ResponseWriter, r *http.Request) {}
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
 	router.HandleFunc("/status", handler)
 
 	testCases := []struct {
@@ -47,7 +48,7 @@ func BenchmarkMuxSimple(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				router.ServeHTTP(nil, request)
+				router.ServeHTTP(context.Background(), nil, request, nil)
 			}
 		})
 	}
@@ -55,27 +56,27 @@ func BenchmarkMuxSimple(b *testing.B) {
 
 func BenchmarkMuxAlternativeInRegexp(b *testing.B) {
 	router := new(Router)
-	handler := func(w http.ResponseWriter, r *http.Request) {}
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
 	router.HandleFunc("/v1/{v1:(?:a|b)}", handler)
 
 	requestA, _ := http.NewRequest("GET", "/v1/a", nil)
 	requestB, _ := http.NewRequest("GET", "/v1/b", nil)
 	for i := 0; i < b.N; i++ {
-		router.ServeHTTP(nil, requestA)
-		router.ServeHTTP(nil, requestB)
+		router.ServeHTTP(context.Background(), nil, requestA, nil)
+		router.ServeHTTP(context.Background(), nil, requestB, nil)
 	}
 }
 
 func BenchmarkManyPathVariables(b *testing.B) {
 	router := new(Router)
-	handler := func(w http.ResponseWriter, r *http.Request) {}
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
 	router.HandleFunc("/v1/{v1}/{v2}/{v3}/{v4}/{v5}", handler)
 
 	matchingRequest, _ := http.NewRequest("GET", "/v1/1/2/3/4/5", nil)
 	notMatchingRequest, _ := http.NewRequest("GET", "/v1/1/2/3/4", nil)
 	recorder := httptest.NewRecorder()
 	for i := 0; i < b.N; i++ {
-		router.ServeHTTP(nil, matchingRequest)
-		router.ServeHTTP(recorder, notMatchingRequest)
+		router.ServeHTTP(context.Background(), nil, matchingRequest, nil)
+		router.ServeHTTP(context.Background(), recorder, notMatchingRequest, nil)
 	}
 }

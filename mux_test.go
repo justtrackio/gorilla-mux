@@ -1739,16 +1739,20 @@ func TestSubrouterErrorHandling(t *testing.T) {
 	subRouterCalled := false
 
 	router := NewRouter()
-	router.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.NotFoundHandler = HandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 		superRouterCalled = true
+		return nil
 	})
 	subRouter := router.PathPrefix("/bign8").Subrouter()
-	subRouter.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	subRouter.NotFoundHandler = HandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 		subRouterCalled = true
+		return nil
 	})
 
 	req, _ := http.NewRequest("GET", "http://localhost/bign8/was/here", nil)
-	router.ServeHTTP(NewRecorder(), req)
+	if err := router.ServeHTTP(context.Background(), NewRecorder(), req, nil); err != nil {
+		t.Fatalf("Error serving request: %v", err)
+	}
 
 	if superRouterCalled {
 		t.Error("Super router 404 handler called when sub-router 404 handler is available.")
@@ -1770,34 +1774,36 @@ func TestPanicOnCapturingGroups(t *testing.T) {
 
 func TestRouterInContext(t *testing.T) {
 	router := NewRouter()
-	router.HandleFunc("/r1", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/r1", func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 		contextRouter := CurrentRouter(r)
 		if contextRouter == nil {
 			t.Fatal("Router not found in context")
-			return
+			return nil
 		}
 
 		route := contextRouter.Get("r2")
 		if route == nil {
 			t.Fatal("Route with name not found")
-			return
+			return nil
 		}
 
 		url, err := route.URL()
 		if err != nil {
 			t.Fatal("Error while getting url for r2: ", err)
-			return
+			return nil
 		}
 
 		_, err = w.Write([]byte(url.String()))
 		if err != nil {
 			t.Fatalf("Failed writing HTTP response: %v", err)
 		}
+
+		return nil
 	}).Name("r1")
 
 	noRouterMsg := []byte("no-router")
 	haveRouterMsg := []byte("have-router")
-	router.HandleFunc("/r2", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/r2", func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 		var msg []byte
 
 		contextRouter := CurrentRouter(r)
@@ -1811,13 +1817,17 @@ func TestRouterInContext(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed writing HTTP response: %v", err)
 		}
+
+		return nil
 	}).Name("r2")
 
 	t.Run("router in request context get route by name", func(t *testing.T) {
 		rw := NewRecorder()
 		req := newRequest("GET", "/r1")
 
-		router.ServeHTTP(rw, req)
+		if err := router.ServeHTTP(req.Context(), rw, req, nil); err != nil {
+			t.Fatalf("Error serving request: %v", err)
+		}
 		if !bytes.Equal(rw.Body.Bytes(), []byte("/r2")) {
 			t.Fatalf("Expected output to be '/r1' but got '%s'", rw.Body.String())
 		}
@@ -1828,7 +1838,9 @@ func TestRouterInContext(t *testing.T) {
 		req := newRequest("GET", "/r2")
 
 		router.OmitRouterFromContext(true)
-		router.ServeHTTP(rw, req)
+		if err := router.ServeHTTP(req.Context(), rw, req, nil); err != nil {
+			t.Fatalf("Error serving request: %v", err)
+		}
 		if !bytes.Equal(rw.Body.Bytes(), noRouterMsg) {
 			t.Fatal("Router not omitted from context")
 		}
@@ -1937,11 +1949,11 @@ func testRoute(t *testing.T, test routeTest) {
 				return
 			}
 		}
-		if shouldRedirect && match.Handler == nil {
+		if shouldRedirect && isNil(match.Handler) {
 			t.Errorf("(%v) Did not redirect", test.title)
 			return
 		}
-		if !shouldRedirect && match.Handler != nil {
+		if !shouldRedirect && !isNil(match.Handler) {
 			t.Errorf("(%v) Unexpected redirect", test.title)
 			return
 		}
@@ -2029,8 +2041,8 @@ func (ho *TestA301ResponseWriter) WriteHeader(code int) {
 func Test301Redirect(t *testing.T) {
 	m := make(http.Header)
 
-	func1 := func(w http.ResponseWriter, r *http.Request) {}
-	func2 := func(w http.ResponseWriter, r *http.Request) {}
+	func1 := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
+	func2 := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
 
 	r := NewRouter()
 	r.HandleFunc("/api/", func2).Name("func2")
@@ -2042,7 +2054,9 @@ func Test301Redirect(t *testing.T) {
 		hh:     m,
 		status: 0,
 	}
-	r.ServeHTTP(&res, req)
+	if err := r.ServeHTTP(req.Context(), &res, req, nil); err != nil {
+		t.Fatalf("Error serving request: %v", err)
+	}
 
 	if "http://localhost/api/?abc=def" != res.hh["Location"][0] {
 		t.Errorf("Should have complete URL with query string")
@@ -2050,8 +2064,8 @@ func Test301Redirect(t *testing.T) {
 }
 
 func TestSkipClean(t *testing.T) {
-	func1 := func(w http.ResponseWriter, r *http.Request) {}
-	func2 := func(w http.ResponseWriter, r *http.Request) {}
+	func1 := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
+	func2 := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
 
 	r := NewRouter()
 	r.SkipClean(true)
@@ -2060,7 +2074,9 @@ func TestSkipClean(t *testing.T) {
 
 	req, _ := http.NewRequest("GET", "http://localhost//api/?abc=def", nil)
 	res := NewRecorder()
-	r.ServeHTTP(res, req)
+	if err := r.ServeHTTP(req.Context(), res, req, nil); err != nil {
+		t.Fatalf("Error serving request: %v", err)
+	}
 
 	if len(res.HeaderMap["Location"]) != 0 {
 		t.Errorf("Shouldn't redirect since skip clean is disabled")
@@ -2070,10 +2086,14 @@ func TestSkipClean(t *testing.T) {
 // https://plus.google.com/101022900381697718949/posts/eWy6DjFJ6uW
 func TestSubrouterHeader(t *testing.T) {
 	expected := "func1 response"
-	func1 := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, expected)
+	func1 := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
+		_, err := fmt.Fprint(w, expected)
+
+		return err
 	}
-	func2 := func(http.ResponseWriter, *http.Request) {}
+	func2 := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
+		return nil
+	}
 
 	r := NewRouter()
 	s := r.Headers("SomeSpecialHeader", "").Subrouter()
@@ -2091,14 +2111,16 @@ func TestSubrouterHeader(t *testing.T) {
 		t.Errorf("Expecting func1 handler, got %s", match.Route.GetName())
 	}
 	resp := NewRecorder()
-	match.Handler.ServeHTTP(resp, req)
+	if err := match.Handler.ServeHTTP(req.Context(), resp, req, nil); err != nil {
+		t.Fatalf("Error serving request: %v", err)
+	}
 	if resp.Body.String() != expected {
 		t.Errorf("Expecting %q", expected)
 	}
 }
 
 func TestNoMatchMethodErrorHandler(t *testing.T) {
-	func1 := func(w http.ResponseWriter, r *http.Request) {}
+	func1 := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
 
 	r := NewRouter()
 	r.HandleFunc("/", func1).Methods("GET", "POST")
@@ -2116,7 +2138,9 @@ func TestNoMatchMethodErrorHandler(t *testing.T) {
 	}
 
 	resp := NewRecorder()
-	r.ServeHTTP(resp, req)
+	if err := r.ServeHTTP(req.Context(), resp, req, nil); err != nil {
+		t.Fatalf("Error serving request: %v", err)
+	}
 	if resp.Code != http.StatusMethodNotAllowed {
 		t.Errorf("Expecting code %v", 405)
 	}
@@ -2137,7 +2161,7 @@ func TestNoMatchMethodErrorHandler(t *testing.T) {
 }
 
 func TestMultipleDefinitionOfSamePathWithDifferentMethods(t *testing.T) {
-	emptyHandler := func(w http.ResponseWriter, r *http.Request) {}
+	emptyHandler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
 
 	r := NewRouter()
 	r.HandleFunc("/api", emptyHandler).Methods("POST")
@@ -2184,7 +2208,7 @@ func TestMultipleDefinitionOfSamePathWithDifferentMethods(t *testing.T) {
 }
 
 func TestMultipleDefinitionOfSamePathWithDifferentQueries(t *testing.T) {
-	emptyHandler := func(w http.ResponseWriter, r *http.Request) {}
+	emptyHandler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
 
 	r := NewRouter()
 	r.HandleFunc("/api", emptyHandler).Queries("foo", "{foo:[0-9]+}").Methods(http.MethodGet)
@@ -2202,7 +2226,7 @@ func TestMultipleDefinitionOfSamePathWithDifferentQueries(t *testing.T) {
 }
 
 func TestErrMatchNotFound(t *testing.T) {
-	emptyHandler := func(w http.ResponseWriter, r *http.Request) {}
+	emptyHandler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { return nil }
 
 	r := NewRouter()
 	r.HandleFunc("/", emptyHandler)
@@ -2223,7 +2247,7 @@ func TestErrMatchNotFound(t *testing.T) {
 	}
 
 	// Now lets add a 404 handler to subrouter
-	s.NotFoundHandler = http.NotFoundHandler()
+	s.NotFoundHandler = NotFoundHandler()
 	req, _ = http.NewRequest("GET", "/sub/whatever", nil)
 
 	// Test the subrouter first
@@ -2267,12 +2291,14 @@ type methodsSubrouterTest struct {
 }
 
 // methodHandler writes the method string in response.
-func methodHandler(method string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func methodHandler(method string) HandlerFunc {
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 		_, err := w.Write([]byte(method))
 		if err != nil {
 			log.Printf("Failed writing HTTP response: %v", err)
 		}
+
+		return nil
 	}
 }
 
@@ -2560,7 +2586,9 @@ func testMethodsSubrouter(t *testing.T, test methodsSubrouterTest) {
 	// Execute request
 	req, _ := http.NewRequest(test.method, test.path, nil)
 	resp := NewRecorder()
-	test.router.ServeHTTP(resp, req)
+	if err := test.router.ServeHTTP(req.Context(), resp, req, nil); err != nil {
+		t.Fatalf("Error serving request: %v", err)
+	}
 
 	switch test.wantCode {
 	case http.StatusMethodNotAllowed:
@@ -2854,7 +2882,7 @@ func Test_copyRouteConf(t *testing.T) {
 }
 
 func TestMethodNotAllowed(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { w.WriteHeader(http.StatusOK); return nil }
 	router := NewRouter()
 	router.HandleFunc("/thing", handler).Methods(http.MethodGet)
 	router.HandleFunc("/something", handler).Methods(http.MethodGet)
@@ -2862,7 +2890,9 @@ func TestMethodNotAllowed(t *testing.T) {
 	w := NewRecorder()
 	req := newRequest(http.MethodPut, "/thing")
 
-	router.ServeHTTP(w, req)
+	if err := router.ServeHTTP(req.Context(), w, req, nil); err != nil {
+		t.Fatalf("Error serving request: %v", err)
+	}
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("Expected status code 405 (got %d)", w.Code)
@@ -2870,7 +2900,7 @@ func TestMethodNotAllowed(t *testing.T) {
 }
 
 func TestMethodNotAllowedSubrouterWithSeveralRoutes(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { w.WriteHeader(http.StatusOK); return nil }
 
 	router := NewRouter()
 	subrouter := router.PathPrefix("/v1").Subrouter()
@@ -2879,7 +2909,9 @@ func TestMethodNotAllowedSubrouterWithSeveralRoutes(t *testing.T) {
 
 	w := NewRecorder()
 	req := newRequest(http.MethodPut, "/v1/api")
-	router.ServeHTTP(w, req)
+	if err := router.ServeHTTP(req.Context(), w, req, nil); err != nil {
+		t.Fatalf("Error serving request: %v", err)
+	}
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("Expected status code 405 (got %d)", w.Code)
@@ -2890,13 +2922,15 @@ type customMethodNotAllowedHandler struct {
 	msg string
 }
 
-func (h customMethodNotAllowedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h customMethodNotAllowedHandler) ServeHTTP(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 	w.WriteHeader(http.StatusMethodNotAllowed)
 	fmt.Fprint(w, h.msg)
+
+	return nil
 }
 
 func TestSubrouterCustomMethodNotAllowed(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { w.WriteHeader(http.StatusOK); return nil }
 
 	router := NewRouter()
 	router.HandleFunc("/test", handler).Methods(http.MethodGet)
@@ -2925,7 +2959,9 @@ func TestSubrouterCustomMethodNotAllowed(t *testing.T) {
 			w := NewRecorder()
 			req := newRequest(http.MethodPut, tc.path)
 
-			router.ServeHTTP(w, req)
+			if err := router.ServeHTTP(req.Context(), w, req, nil); err != nil {
+				t.Fatalf("Error serving request: %v", err)
+			}
 
 			if w.Code != http.StatusMethodNotAllowed {
 				tt.Errorf("Expected status code 405 (got %d)", w.Code)
@@ -2944,7 +2980,7 @@ func TestSubrouterCustomMethodNotAllowed(t *testing.T) {
 }
 
 func TestSubrouterNotFound(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error { w.WriteHeader(http.StatusOK); return nil }
 	router := NewRouter()
 	router.Path("/a").Subrouter().HandleFunc("/thing", handler).Methods(http.MethodGet)
 	router.Path("/b").Subrouter().HandleFunc("/something", handler).Methods(http.MethodGet)
@@ -2952,7 +2988,9 @@ func TestSubrouterNotFound(t *testing.T) {
 	w := NewRecorder()
 	req := newRequest(http.MethodPut, "/not-present")
 
-	router.ServeHTTP(w, req)
+	if err := router.ServeHTTP(req.Context(), w, req, nil); err != nil {
+		t.Fatalf("Error serving request: %v", err)
+	}
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("Expected status code 404 (got %d)", w.Code)
@@ -2960,25 +2998,29 @@ func TestSubrouterNotFound(t *testing.T) {
 }
 
 func TestContextMiddleware(t *testing.T) {
-	withTimeout := func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	withTimeout := func(h HandlerFunc) HandlerFunc {
+		return func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 			ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 			defer cancel()
-			h.ServeHTTP(w, r.WithContext(ctx))
-		})
+
+			return h.ServeHTTP(ctx, w, r.WithContext(ctx), binder)
+		}
 	}
 
 	r := NewRouter()
-	r.Handle("/path/{foo}", withTimeout(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	r.Handle("/path/{foo}", withTimeout(HandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 		vars := Vars(r)
 		if vars["foo"] != "bar" {
 			t.Fatal("Expected foo var to be set")
 		}
+		return nil
 	})))
 
 	rec := NewRecorder()
 	req := newRequest("GET", "/path/bar")
-	r.ServeHTTP(rec, req)
+	if err := r.ServeHTTP(req.Context(), rec, req, nil); err != nil {
+		t.Fatalf("Error serving request: %v", err)
+	}
 }
 
 func TestGetVarNames(t *testing.T) {
@@ -3075,7 +3117,7 @@ func TestPopulateContext(t *testing.T) {
 			r.OmitRouteFromContext(tc.omitRouteFromContext)
 			var static *Route
 			var dynamic *Route
-			fn := func(w http.ResponseWriter, r *http.Request) {
+			fn := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 				matched = true
 				if got := Vars(r)["x"]; got != tc.wantVar {
 					t.Fatalf("wantVar=%q, got=%q", tc.wantVar, got)
@@ -3097,12 +3139,16 @@ func TestPopulateContext(t *testing.T) {
 					}
 				}
 				w.WriteHeader(http.StatusNoContent)
+
+				return nil
 			}
 			static = r.Name("static").Path("/static").HandlerFunc(fn)
 			dynamic = r.Name("dynamic").Path("/dynamic/{x:.*}").HandlerFunc(fn)
 			req := newRequest(http.MethodGet, "http://localhost"+tc.path)
 			rec := NewRecorder()
-			r.ServeHTTP(rec, req)
+			if err := r.ServeHTTP(req.Context(), rec, req, nil); err != nil {
+				t.Fatalf("Error serving request: %v", err)
+			}
 			if !matched {
 				t.Fatal("Expected route to match")
 			}
@@ -3117,9 +3163,10 @@ func BenchmarkPopulateContext(b *testing.B) {
 			matched := false
 			r := NewRouter()
 			r.OmitRouteFromContext(tc.omitRouteFromContext)
-			fn := func(w http.ResponseWriter, r *http.Request) {
+			fn := func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 				matched = true
 				w.WriteHeader(http.StatusNoContent)
+				return nil
 			}
 			r.Name("static").Path("/static").HandlerFunc(fn)
 			r.Name("dynamic").Path("/dynamic/{x:.*}").HandlerFunc(fn)
@@ -3128,7 +3175,9 @@ func BenchmarkPopulateContext(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				r.ServeHTTP(rec, req)
+				if err := r.ServeHTTP(req.Context(), rec, req, nil); err != nil {
+					b.Fatalf("Error serving request: %v", err)
+				}
 			}
 			if !matched {
 				b.Fatal("Expected route to match")
@@ -3166,12 +3215,11 @@ func stringMapEqual(m1, m2 map[string]string) bool {
 
 // stringHandler returns a handler func that writes a message 's' to the
 // http.ResponseWriter.
-func stringHandler(s string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func stringHandler(s string) HandlerFunc {
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 		_, err := w.Write([]byte(s))
-		if err != nil {
-			log.Printf("Failed writing HTTP response: %v", err)
-		}
+
+		return err
 	}
 }
 

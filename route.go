@@ -5,6 +5,7 @@
 package mux
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 // Route stores information to match a request and build URLs.
 type Route struct {
 	// Request handler for the route.
-	handler http.Handler
+	handler Handler
 	// If true, this route never matches: it is only used to build URLs.
 	buildOnly bool
 	// The name used to build URLs.
@@ -104,7 +105,7 @@ func (r *Route) Match(req *http.Request, match *RouteMatch) bool {
 	if match.Route == nil {
 		match.Route = r
 	}
-	if match.Handler == nil {
+	if isNil(match.Handler) {
 		match.Handler = r.GetHandlerWithMiddlewares()
 	}
 
@@ -174,7 +175,7 @@ func (r *Route) GetMetadataValueOr(key any, fallbackValue any) any {
 // Handler --------------------------------------------------------------------
 
 // Handler sets a handler for the route.
-func (r *Route) Handler(handler http.Handler) *Route {
+func (r *Route) Handler(handler Handler) *Route {
 	if r.err == nil {
 		r.handler = handler
 	}
@@ -182,27 +183,31 @@ func (r *Route) Handler(handler http.Handler) *Route {
 }
 
 // HandlerFunc sets a handler function for the route.
-func (r *Route) HandlerFunc(f func(http.ResponseWriter, *http.Request)) *Route {
-	return r.Handler(http.HandlerFunc(f))
+func (r *Route) HandlerFunc(f func(context.Context, http.ResponseWriter, *http.Request, Binder) error) *Route {
+	return r.Handler(HandlerFunc(f))
 }
 
 // GetHandler returns the handler for the route, if any.
-func (r *Route) GetHandler() http.Handler {
+func (r *Route) GetHandler() Handler {
 	return r.handler
 }
 
 // GetHandlerWithMiddleware returns the route handler wrapped in the assigned middlewares.
 // If no middlewares are specified, just the handler, if any, is returned.
-func (r *Route) GetHandlerWithMiddlewares() http.Handler {
+func (r *Route) GetHandlerWithMiddlewares() HandlerFunc {
 	handler := r.handler
 
 	if handler != nil && len(r.middlewares) > 0 {
 		for i := len(r.middlewares) - 1; i >= 0; i-- {
-			handler = r.middlewares[i].Middleware(handler)
+			handler = r.middlewares[i].Middleware(HandlerToHandlerFunc(handler))
 		}
 	}
 
-	return handler
+	if handler == nil {
+		return nil
+	}
+
+	return HandlerToHandlerFunc(handler)
 }
 
 // Name -----------------------------------------------------------------------

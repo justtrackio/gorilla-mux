@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"context"
 	"net/http"
 	"strings"
 )
@@ -8,15 +9,15 @@ import (
 // MiddlewareFunc is a function which receives an http.Handler and returns another http.Handler.
 // Typically, the returned handler is a closure which does something with the http.ResponseWriter and http.Request passed
 // to it, and then calls the handler passed as parameter to the MiddlewareFunc.
-type MiddlewareFunc func(http.Handler) http.Handler
+type MiddlewareFunc func(handlerFunc HandlerFunc) HandlerFunc
 
 // middleware interface is anything which implements a MiddlewareFunc named Middleware.
 type middleware interface {
-	Middleware(handler http.Handler) http.Handler
+	Middleware(handler HandlerFunc) HandlerFunc
 }
 
 // Middleware allows MiddlewareFunc to implement the middleware interface.
-func (mw MiddlewareFunc) Middleware(handler http.Handler) http.Handler {
+func (mw MiddlewareFunc) Middleware(handler HandlerFunc) HandlerFunc {
 	return mw(handler)
 }
 
@@ -53,8 +54,8 @@ func (r *Route) useInterface(mw middleware) {
 // the route. Routes that do not explicitly handle OPTIONS requests will not be processed
 // by the middleware. See examples for usage.
 func CORSMethodMiddleware(r *Router) MiddlewareFunc {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	return func(next HandlerFunc) HandlerFunc {
+		return func(ctx context.Context, w http.ResponseWriter, req *http.Request, binder Binder) error {
 			allMethods, err := getAllMethodsForRoute(r, req)
 			if err == nil {
 				for _, v := range allMethods {
@@ -64,8 +65,8 @@ func CORSMethodMiddleware(r *Router) MiddlewareFunc {
 				}
 			}
 
-			next.ServeHTTP(w, req)
-		})
+			return next.ServeHTTP(ctx, w, req, binder)
+		}
 	}
 }
 

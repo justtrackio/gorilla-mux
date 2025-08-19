@@ -1,6 +1,7 @@
 package mux_test
 
 import (
+	"context"
 	"log"
 	"net/http"
 
@@ -21,24 +22,26 @@ func (amw *authenticationMiddleware) Populate() {
 }
 
 // Middleware function, which will be called for each request
-func (amw *authenticationMiddleware) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func (amw *authenticationMiddleware) Middleware(next mux.HandlerFunc) mux.HandlerFunc {
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder mux.Binder) error {
 		token := r.Header.Get("X-Session-Token")
 
 		if user, found := amw.tokenUsers[token]; found {
 			// We found the token in our map
 			log.Printf("Authenticated user %s\n", user)
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ctx, w, r, binder)
 		} else {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 		}
-	})
+
+		return nil
+	}
 }
 
 func Example_authenticationMiddleware() {
 	r := mux.NewRouter()
-	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Do something here
+	r.HandleFunc("/", func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder mux.Binder) error {
+		return nil
 	})
 	amw := authenticationMiddleware{make(map[string]string)}
 	amw.Populate()

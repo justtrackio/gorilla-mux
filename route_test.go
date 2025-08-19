@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"reflect"
@@ -10,7 +11,7 @@ import (
 )
 
 var testNewRouterMu sync.Mutex
-var testHandler = http.NotFoundHandler()
+var testHandler = NotFoundHandler()
 
 func BenchmarkNewRouter(b *testing.B) {
 	testNewRouterMu.Lock()
@@ -59,7 +60,7 @@ func BenchmarkNewRouterRegexpFunc(b *testing.B) {
 	}
 }
 
-func testNewRouter(_ testing.TB, handler http.Handler) {
+func testNewRouter(_ testing.TB, handler Handler) {
 	r := NewRouter()
 	// A route with a route variable:
 	r.Handle("/metrics/{type}", handler)
@@ -74,7 +75,7 @@ func TestRouteMetadata(t *testing.T) {
 	expectedMap := make(map[any]any)
 	expectedMap["key"] = "value"
 
-	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/", func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 		route := CurrentRoute(r)
 		metadata := route.GetMetadata()
 
@@ -83,9 +84,10 @@ func TestRouteMetadata(t *testing.T) {
 			t.Fatalf("Expected map does not equal the metadata map")
 		}
 
+		return nil
 	}).Metadata("key", "value")
 
-	router.HandleFunc("/single-value", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/single-value", func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 		route := CurrentRoute(r)
 		value, err := route.GetMetadataValue("key")
 		if err != nil {
@@ -110,9 +112,10 @@ func TestRouteMetadata(t *testing.T) {
 			t.Fatalf("Expected error to be ErrMetadataKeyNotFound but got: %s", err)
 		}
 
+		return nil
 	}).Metadata("key", "value")
 
-	router.HandleFunc("/single-value-fallback", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/single-value-fallback", func(ctx context.Context, w http.ResponseWriter, r *http.Request, binder Binder) error {
 		route := CurrentRoute(r)
 		value := route.GetMetadataValueOr("key", "value-fallback")
 
@@ -135,20 +138,21 @@ func TestRouteMetadata(t *testing.T) {
 			t.Fatalf("Expected metadata value to be '%s', but got '%s'", "value2", fallbackStringValue)
 		}
 
+		return nil
 	}).Metadata("key", "value")
 
 	t.Run("get metadata map", func(t *testing.T) {
 		req := newRequest("GET", "/")
-		router.ServeHTTP(rw, req)
+		router.ServeHTTP(context.Background(), rw, req, nil)
 	})
 
 	t.Run("get metadata value", func(t *testing.T) {
 		req := newRequest("GET", "/single-value")
-		router.ServeHTTP(rw, req)
+		router.ServeHTTP(context.Background(), rw, req, nil)
 	})
 
 	t.Run("get metadata value or fallback", func(t *testing.T) {
 		req := newRequest("GET", "/single-value-fallback")
-		router.ServeHTTP(rw, req)
+		router.ServeHTTP(context.Background(), rw, req, nil)
 	})
 }
